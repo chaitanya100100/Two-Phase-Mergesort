@@ -45,7 +45,6 @@ bool compare_phase1(Record & r1, Record & r2)
             if(r1.fields[sort_col_idx[i]] != r2.fields[sort_col_idx[i]])
                 return (r1.fields[sort_col_idx[i]] < r2.fields[sort_col_idx[i]]);
         }
-        return true;
     }
     else
     {
@@ -54,26 +53,38 @@ bool compare_phase1(Record & r1, Record & r2)
             if(r1.fields[sort_col_idx[i]] != r2.fields[sort_col_idx[i]])
                 return (r1.fields[sort_col_idx[i]] > r2.fields[sort_col_idx[i]]);
         }
-        return true;
     }
+    return false;
 }
-
-// bool compare_phase1(Record & r1, Record & r2)
-// {
-//
-//     for(int i = 0; i < sort_col_idx.size(); i++)
-//     {
-//         if(r1.fields[sort_col_idx[i]] != r2.fields[sort_col_idx[i]])
-//             return (r1.fields[sort_col_idx[i]] < r2.fields[sort_col_idx[i]]);
-//     }
-//     return true;
-// }
-
 
 void phase1sort(vector<Record> & records)
 {
     sort(records.begin(), records.end(), compare_phase1);
 }
+
+struct compare_phase2
+ {
+   bool operator()(const pair<Record, int> & r1, const pair<Record, int> & r2)
+   {
+       if(ASC)
+       {
+           for(int i = 0; i < sort_col_idx.size(); i++)
+           {
+               if(r1.first.fields[sort_col_idx[i]] != r2.first.fields[sort_col_idx[i]])
+                   return (r1.first.fields[sort_col_idx[i]] > r2.first.fields[sort_col_idx[i]]);
+           }
+       }
+       else
+       {
+           for(int i = 0; i < sort_col_idx.size(); i++)
+           {
+               if(r1.first.fields[sort_col_idx[i]] != r2.first.fields[sort_col_idx[i]])
+                   return (r1.first.fields[sort_col_idx[i]] < r2.first.fields[sort_col_idx[i]]);
+           }
+       }
+       return r1.second > r2.second;
+   }
+ };
 
 void preprocess(int argc, char ** argv)
 {
@@ -183,6 +194,27 @@ void write_records(ofstream & of, vector<Record> & records)
     }
 }
 
+void write_records2(ofstream & of, vector<Record> & records)
+{
+    string s;
+    vector<string> vs(records.size());
+    int idx = records.size()-1;
+    while(!records.empty())
+    {
+        Record & r = records.back();
+        s = r.fields[0];
+        for(int j = 1; j < num_cols; j++)
+            s = s + "  " + r.fields[j];
+        // s = s + "\r\n";
+        vs[idx] = s;
+        idx--;
+        records.pop_back();
+    }
+    std::stringstream fin;
+    copy(vs.begin(), vs.end(), ostream_iterator<string>(fin, "\r\n"));
+    of << fin.rdbuf();
+}
+
 Record construct_record(string & line)
 {
     vector<string> vs(num_cols);
@@ -199,9 +231,9 @@ void phase_one()
 {
     // ideally it should be MM but there is other constant space requirement for this code
     // so I am taking MM/2
-    long long MAXN = MM / 2;
+    long long MAXN = MM;
+    cout << "Phase 1 started" << endl;
     cout << "MAXN : " << MAXN << endl;
-    cout << endl;
 
     ifstream inpf(input_path);
     if(!inpf.good())
@@ -237,50 +269,13 @@ void phase_one()
         }
     }
     inpf.close();
+    cout << "NUMSUB : " << NUMSUB << endl;
+    cout << endl;
 }
-
-struct compare_phase2
- {
-   bool operator()(const pair<Record, int> & r1, const pair<Record, int> & r2)
-   {
-       if(ASC)
-       {
-           for(int i = 0; i < sort_col_idx.size(); i++)
-           {
-               if(r1.first.fields[sort_col_idx[i]] != r2.first.fields[sort_col_idx[i]])
-                   return (r1.first.fields[sort_col_idx[i]] > r2.first.fields[sort_col_idx[i]]);
-           }
-           return true;
-       }
-       else
-       {
-           for(int i = 0; i < sort_col_idx.size(); i++)
-           {
-               if(r1.first.fields[sort_col_idx[i]] != r2.first.fields[sort_col_idx[i]])
-                   return (r1.first.fields[sort_col_idx[i]] < r2.first.fields[sort_col_idx[i]]);
-           }
-           return true;
-       }
-   }
- };
-
-// struct compare_phase2
-//  {
-//    bool operator()(const pair<Record, int> & r1, const pair<Record, int> & r2)
-//    {
-//        for(int i = 0; i < sort_col_idx.size(); i++)
-//        {
-//            if(r1.first.fields[sort_col_idx[i]] != r2.first.fields[sort_col_idx[i]])
-//                return (r1.first.fields[sort_col_idx[i]] < r2.first.fields[sort_col_idx[i]]);
-//        }
-//        return true;
-//    }
-//  };
-
-
 
 void phase_two()
 {
+    cout << "Phase 2 started" << endl;
     long long H = MM / (1 + NUMSUB);
     long long SUBSZ = (MM - H) / NUMSUB;
 
@@ -288,7 +283,6 @@ void phase_two()
     cout << "NUMSUB : " << NUMSUB << endl;
     cout << "SUBSZ : " << SUBSZ << endl;
     cout << "H : " << H << endl;
-    cout << endl;
 
     ofstream outf(output_path);
     if(!outf.good())
@@ -339,7 +333,6 @@ void phase_two()
         if(out_records.size() >= H)
         {
             write_records(outf, out_records);
-            outf.flush();
             out_records.clear();
         }
 
@@ -370,12 +363,12 @@ void phase_two()
     if(out_records.size())
     {
         write_records(outf, out_records);
-        outf.flush();
         out_records.clear();
     }
     for(int i = 0; i < NUMSUB; i++)
         inter_outf[i].close();
     outf.close();
+    cout << endl;
 }
 
 int main(int argc, char **argv)
