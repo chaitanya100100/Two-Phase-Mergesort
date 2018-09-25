@@ -6,10 +6,13 @@
 #include<string>
 #include<vector>
 #include<algorithm>
+#include <functional>
+#include <queue>
+
 using namespace std;
 
 string metafile_path("../files/metadata.txt");
-string inter_outpath("../files/inter_out.txt");
+string inter_outdir("../files/inter_files/");
 
 string input_path;
 string output_path;
@@ -19,8 +22,8 @@ vector<int> col_lengths;
 vector<int> sort_col_idx;
 long long MM; // main memory size
 long long R; // record size
-long long MAXN; // number of record that can be brought to main memory at once
-long long NUMR;
+long long NUMR; // total number of records
+long long NUMSUB; // number of sublists
 bool ASC;
 
 struct Record
@@ -32,18 +35,44 @@ struct Record
     }
 };
 
-bool mycompare(Record & r1, Record & r2)
+
+bool compare_phase1(Record & r1, Record & r2)
 {
-    for(int i = 0; i < sort_col_idx.size(); i++)
+    if(ASC)
     {
-        if(r1.fields[sort_col_idx[i]] != r2.fields[sort_col_idx[i]])
-            return (r1.fields[sort_col_idx[i]] < r2.fields[sort_col_idx[i]]);
+        for(int i = 0; i < sort_col_idx.size(); i++)
+        {
+            if(r1.fields[sort_col_idx[i]] != r2.fields[sort_col_idx[i]])
+                return (r1.fields[sort_col_idx[i]] < r2.fields[sort_col_idx[i]]);
+        }
+        return true;
     }
-    return true;
+    else
+    {
+        for(int i = 0; i < sort_col_idx.size(); i++)
+        {
+            if(r1.fields[sort_col_idx[i]] != r2.fields[sort_col_idx[i]])
+                return (r1.fields[sort_col_idx[i]] > r2.fields[sort_col_idx[i]]);
+        }
+        return true;
+    }
 }
+
+// bool compare_phase1(Record & r1, Record & r2)
+// {
+//
+//     for(int i = 0; i < sort_col_idx.size(); i++)
+//     {
+//         if(r1.fields[sort_col_idx[i]] != r2.fields[sort_col_idx[i]])
+//             return (r1.fields[sort_col_idx[i]] < r2.fields[sort_col_idx[i]]);
+//     }
+//     return true;
+// }
+
+
 void phase1sort(vector<Record> & records)
 {
-    sort(records.begin(), records.end(), mycompare);
+    sort(records.begin(), records.end(), compare_phase1);
 }
 
 void preprocess(int argc, char ** argv)
@@ -77,9 +106,6 @@ void preprocess(int argc, char ** argv)
 
     input_path = argv[1];
     output_path = argv[2];
-
-    // main memory size
-    MM = stol(argv[3]) * 1000000; // megabytes to bytes
 
     // sort order : asc or desc
     string order = argv[4];
@@ -127,18 +153,15 @@ void preprocess(int argc, char ** argv)
     NUMR = line_count;
     R = file_size / line_count;
 
-    // ideally it should be (MM/R) but mergesort needs double space to sort
-    // and there is other constant space requirement for this code
-    // so I am taking (MM/(3R))
-    MAXN = MM / (3*R);
-    MAXN = 15;
-
+    // main memory capacity in terms of number of records
+    MM = stol(argv[3]);
+    MM = MM / R;
 
     cout << "file_size : " << file_size << endl;
     cout << "R : " << R << endl;
+    cout << "MM : " << MM << endl;
     cout << "NUMR : " << NUMR << endl;
-    cout << "MAXN : " << MAXN << endl;
-    cout << endl << endl;
+    cout << endl;
     // for(int i = 0; i < col_names.size(); i++)
     //     cout << col_names[i] << " " << col_lengths[i] << endl;
     // for(int i = 0; i < sort_col_idx.size(); i++)
@@ -148,20 +171,38 @@ void preprocess(int argc, char ** argv)
 void write_records(ofstream & of, vector<Record> & records)
 {
     string s;
-    string delim(" ");
     for(int i = 0; i < records.size(); i++)
     {
         s = records[i].fields[0];
         for(int j = 1; j < num_cols; j++)
             s = s + "  " + records[i].fields[j];
-        s = s + "\n";
+        s = s + "\r\n";
         of << s;
+        // cout << s;
         // of << s << endl;
     }
 }
 
+Record construct_record(string & line)
+{
+    vector<string> vs(num_cols);
+    long long pos = 0, off = 0;
+    for(int i = 0; i < num_cols; i++)
+    {
+        vs[i] = line.substr(off, col_lengths[i]);
+        off = line.find_first_not_of(" ", off + col_lengths[i]);
+    }
+    return Record(vs);
+}
+
 void phase_one()
 {
+    // ideally it should be MM but there is other constant space requirement for this code
+    // so I am taking MM/2
+    long long MAXN = MM / 2;
+    cout << "MAXN : " << MAXN << endl;
+    cout << endl;
+
     ifstream inpf(input_path);
     if(!inpf.good())
     {
@@ -169,50 +210,178 @@ void phase_one()
         exit(-1);
     }
 
-    ofstream inter_outf(inter_outpath);
-    if(!inter_outf.good())
-    {
-        cerr << "Unable to open inter out file" << endl;
-        exit(-1);
-    }
-
     long long idx=0;
+    NUMSUB = 0;
     string line, tok;
     vector<Record> records;
     while(getline(inpf, line))
     {
-        vector<string> vs(num_cols);
-        long long pos = 0;
-        for(int i = 0; i < num_cols; i++)
-        {
-            long long off = line.find_first_not_of(" ", pos);
-            vs[i] = line.substr(off, col_lengths[i]);
-            pos = off + col_lengths[i];
-        }
-        records.push_back(Record(vs));
+        Record r = construct_record(line);
+        records.push_back(r);
         idx++;
 
         if((idx % MAXN == 0) || idx == NUMR)
         {
             phase1sort(records);
-            // for(int i = 0; i < records.size(); i++)
-            // {
-            //     for(int j = 0; j < num_cols; j++)
-            //         cout << records[i].fields[j] << " ";
-            //     cout << endl;
-            // }
-            // cout << endl << endl;
+            string inter_outpath = inter_outdir + to_string(NUMSUB) + ".txt";
+            ofstream inter_outf(inter_outpath);
+            if(!inter_outf.good())
+            {
+                cerr << "Unable to open inter out file : " << inter_outpath<< endl;
+                exit(-1);
+            }
             write_records(inter_outf, records);
+            inter_outf.close();
             records.clear();
+            NUMSUB++;
         }
     }
     inpf.close();
-    inter_outf.close();
+}
+
+struct compare_phase2
+ {
+   bool operator()(const pair<Record, int> & r1, const pair<Record, int> & r2)
+   {
+       if(ASC)
+       {
+           for(int i = 0; i < sort_col_idx.size(); i++)
+           {
+               if(r1.first.fields[sort_col_idx[i]] != r2.first.fields[sort_col_idx[i]])
+                   return (r1.first.fields[sort_col_idx[i]] > r2.first.fields[sort_col_idx[i]]);
+           }
+           return true;
+       }
+       else
+       {
+           for(int i = 0; i < sort_col_idx.size(); i++)
+           {
+               if(r1.first.fields[sort_col_idx[i]] != r2.first.fields[sort_col_idx[i]])
+                   return (r1.first.fields[sort_col_idx[i]] < r2.first.fields[sort_col_idx[i]]);
+           }
+           return true;
+       }
+   }
+ };
+
+// struct compare_phase2
+//  {
+//    bool operator()(const pair<Record, int> & r1, const pair<Record, int> & r2)
+//    {
+//        for(int i = 0; i < sort_col_idx.size(); i++)
+//        {
+//            if(r1.first.fields[sort_col_idx[i]] != r2.first.fields[sort_col_idx[i]])
+//                return (r1.first.fields[sort_col_idx[i]] < r2.first.fields[sort_col_idx[i]]);
+//        }
+//        return true;
+//    }
+//  };
+
+
+
+void phase_two()
+{
+    long long H = MM / (1 + NUMSUB);
+    long long SUBSZ = (MM - H) / NUMSUB;
+
+
+    cout << "NUMSUB : " << NUMSUB << endl;
+    cout << "SUBSZ : " << SUBSZ << endl;
+    cout << "H : " << H << endl;
+    cout << endl;
+
+    ofstream outf(output_path);
+    if(!outf.good())
+    {
+        cerr << "Unable to open output file" << endl;
+        exit(-1);
+    }
+    ifstream inter_outf[NUMSUB];
+    for(int i = 0; i < NUMSUB; i++)
+    {
+        string inter_outpath = inter_outdir + to_string(i) + ".txt";
+        inter_outf[i].open(inter_outpath);
+        if(!inter_outf[i].good())
+        {
+            cerr << "Unable to open inter out file : " << inter_outpath << endl;
+            exit(-1);
+        }
+    }
+
+    vector<Record> subl[NUMSUB];
+    string line;
+    for(int i = 0; i < NUMSUB; i++)
+    {
+        int j = 0;
+        while((j < SUBSZ) && (getline(inter_outf[i], line)))
+        {
+            subl[i].push_back(construct_record(line));
+            j++;
+        }
+    }
+    vector<long long> sublidx(NUMSUB, 0);
+
+    priority_queue<pair<Record, int>, vector<pair<Record, int> >, compare_phase2> pq;
+
+    for(int i = 0; i < NUMSUB; i++)
+        for(int j = 0; j < H/NUMSUB && j < subl[i].size(); j++)
+        {
+            pq.push({subl[i][j], i});
+            sublidx[i]++;
+        }
+
+    vector<Record> out_records;
+    while(!pq.empty())
+    {
+        pair<Record, int> ri = pq.top(); pq.pop();
+        out_records.push_back(ri.first);
+
+        if(out_records.size() >= H)
+        {
+            write_records(outf, out_records);
+            outf.flush();
+            out_records.clear();
+        }
+
+        int si = ri.second;
+        if(sublidx[si] == subl[si].size())
+        {
+            subl[si].clear();
+            int j = 0;
+            while((j < SUBSZ) && getline(inter_outf[si], line))
+            {
+                subl[si].push_back(construct_record(line));
+                j++;
+            }
+
+            sublidx[si] = 0;
+            for(int k = 0; k < H/NUMSUB && k < subl[si].size(); k++)
+            {
+                pq.push({subl[si][k], si});
+                sublidx[si]++;
+            }
+        }
+        else
+        {
+            pq.push({subl[si][sublidx[si]], si});
+            sublidx[si]++;
+        }
+    }
+    if(out_records.size())
+    {
+        write_records(outf, out_records);
+        outf.flush();
+        out_records.clear();
+    }
+    for(int i = 0; i < NUMSUB; i++)
+        inter_outf[i].close();
+    outf.close();
 }
 
 int main(int argc, char **argv)
 {
     preprocess(argc, argv);
     phase_one();
+    phase_two();
     return 0;
 }
